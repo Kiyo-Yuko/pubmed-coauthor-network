@@ -1,0 +1,1135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walk in the Network — PubMed Co-authorship</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  /* ── Palette ─────────────────────────────────────────────── */
+  :root{
+    --bg:#0e1525;
+    --panel:#141d33;
+    --border:#223257;
+    --fg:#dde4f0;
+    --muted:#8aa0c7;
+
+    --c1:#4f9cf9;
+    --c2:#a78bfa;
+    --co:#dde4f0;
+
+    --e1:#4f9cf9;
+    --e2:#a78bfa;
+    --es:#4ade80;
+    --eg:#8ca0c8;
+
+    --accent:#4f9cf9;
+    --danger:#f87171;
+    --ok:#4ade80;
+
+    --header-h:64px;
+    --aside-w:340px;
+  }
+
+  /* ── Reset ───────────────────────────────────────────────── */
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent)}
+
+  /* ── Header ──────────────────────────────────────────────── */
+  header{
+    height:var(--header-h);
+    padding:0 20px;
+    border-bottom:1px solid var(--border);
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    background:linear-gradient(135deg,#0a1020 0%,#111b35 60%,#0d1a30 100%);
+    position:relative;overflow:hidden;flex-shrink:0;
+  }
+  /* subtle animated star-field lines */
+  header::before{
+    content:"";position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse 60% 80% at 20% 50%, rgba(79,156,249,.07) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 60% at 80% 50%, rgba(167,139,250,.05) 0%, transparent 70%);
+    pointer-events:none;
+  }
+  .header-left{display:flex;flex-direction:column;gap:2px;position:relative}
+  .header-title{
+    margin:0;font-size:22px;font-weight:700;letter-spacing:.04em;
+    background:linear-gradient(90deg,#4f9cf9 0%,#a78bfa 60%,#4ade80 100%);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    background-clip:text;
+    line-height:1.1;
+  }
+  .header-sub{
+    font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);opacity:.8;
+  }
+  .header-chip{
+    font-size:11px;padding:4px 10px;border-radius:999px;
+    border:1px solid var(--border);color:var(--muted);
+    background:rgba(255,255,255,.04);white-space:nowrap;
+    flex-shrink:0;position:relative;
+  }
+
+  /* ── Layout ──────────────────────────────────────────────── */
+  main{
+    display:grid;
+    grid-template-columns:1fr var(--aside-w);
+    height:calc(100vh - var(--header-h));
+  }
+  @media(max-width:768px){
+    :root{--aside-w:100%;--header-h:56px}
+    main{grid-template-columns:1fr;grid-template-rows:55vw 1fr;height:auto}
+    .header-title{font-size:17px}
+    .header-chip{display:none}
+  }
+
+  /* ── Graph area ───────────────────────────────────────────── */
+  .graph-wrap{position:relative;border-right:1px solid var(--border);overflow:hidden}
+  #network{position:absolute;inset:0;touch-action:none}
+  @media(max-width:768px){.graph-wrap{height:55vw}#network{position:absolute}}
+
+  /* ── Empty hint ───────────────────────────────────────────── */
+  .empty-hint{
+    position:absolute;inset:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;padding:32px;text-align:center;pointer-events:none;
+  }
+  .empty-hint-icon{
+    font-size:48px;line-height:1;opacity:.5;
+    animation:float 3.5s ease-in-out infinite;
+  }
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+  .empty-hint-title{
+    font-size:18px;font-weight:700;letter-spacing:.03em;
+    background:linear-gradient(90deg,#4f9cf9,#a78bfa);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    background-clip:text;
+    margin:0;
+  }
+  .empty-hint-body{
+    font-size:13px;color:var(--muted);line-height:1.8;margin:0;
+    max-width:320px;
+  }
+  .empty-hint-body b{color:var(--c1);-webkit-text-fill-color:var(--c1)}
+  .empty-hint-steps{
+    display:flex;flex-direction:column;gap:8px;
+    font-size:12px;color:var(--muted);
+  }
+  .step{
+    display:flex;align-items:center;gap:10px;
+    background:rgba(255,255,255,.03);
+    border:1px solid var(--border);
+    border-radius:8px;padding:8px 12px;
+  }
+  .step-num{
+    width:20px;height:20px;border-radius:50%;
+    background:var(--accent);color:#0b1122;
+    font-size:11px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+
+  /* ── Overlay / spinner ───────────────────────────────────── */
+  #network{transition:opacity .35s ease}
+  .graph-wrap.loading #network{opacity:.3;filter:blur(1.5px)}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;opacity:0;transition:opacity .25s ease;z-index:10}
+  .graph-wrap.loading .overlay{opacity:1}
+  .spinner{width:34px;height:34px;border:2px solid rgba(255,255,255,.12);
+    border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .overlay-label{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+    font-size:12px;color:var(--muted);background:rgba(14,21,37,.88);
+    border:1px solid var(--border);border-radius:999px;padding:4px 14px;white-space:nowrap}
+
+  /* ── Aside / sidebar ──────────────────────────────────────── */
+  aside{
+    padding:16px;overflow-y:auto;overflow-x:hidden;
+    background:var(--panel);
+    display:flex;flex-direction:column;gap:14px;
+    border-left:1px solid var(--border);
+  }
+  @media(max-width:768px){
+    aside{border-left:none;border-top:1px solid var(--border);padding:14px}
+  }
+
+  /* ── Controls ─────────────────────────────────────────────── */
+  .controls{display:flex;flex-direction:column;gap:8px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  label{display:block;font-size:10px;color:var(--muted);margin-bottom:3px;
+    letter-spacing:.06em;text-transform:uppercase}
+  input{
+    font-family:inherit;font-size:13px;padding:9px 11px;border-radius:7px;
+    border:1px solid var(--border);background:#0b1122;color:var(--fg);width:100%;
+    transition:border-color .15s,box-shadow .15s;
+    -webkit-appearance:none;
+  }
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,156,249,.12)}
+  /* bigger tap targets on mobile */
+  @media(max-width:768px){input{padding:11px 13px;font-size:16px}}
+
+  button#go{
+    font-family:inherit;font-size:13px;padding:10px;border-radius:7px;
+    border:none;width:100%;cursor:pointer;font-weight:700;letter-spacing:.05em;
+    background:linear-gradient(90deg,#4f9cf9 0%,#7b6ff8 100%);
+    color:#ffffff;
+    box-shadow:0 2px 12px rgba(79,156,249,.30);
+    transition:filter .15s,box-shadow .15s,transform .1s;
+  }
+  button#go:hover{filter:brightness(1.1);box-shadow:0 4px 18px rgba(79,156,249,.45)}
+  button#go:active{transform:scale(.98)}
+  button#go:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;filter:none}
+  @media(max-width:768px){button#go{padding:13px;font-size:16px}}
+
+  /* ── Status ───────────────────────────────────────────────── */
+  .status{min-height:16px;font-size:12px;color:var(--muted);white-space:pre-wrap}
+  .status.err{color:var(--danger)}
+  .status.ok{color:var(--ok)}
+
+  /* ── Table ────────────────────────────────────────────────── */
+  .summary{border-collapse:collapse;width:100%;font-size:12px}
+  .summary th,.summary td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--border)}
+  .summary th{color:var(--muted);font-weight:500}
+  .summary tr.pick{cursor:pointer}
+  .summary tr.pick:hover td{background:#121f3a}
+
+  /* ── Detail panel ─────────────────────────────────────────── */
+  .detail h3{margin:4px 0;font-size:13px;color:var(--c1)}
+  .detail ol{margin:6px 0 0 18px;padding:0;max-height:260px;overflow-y:auto}
+  .detail li{margin-bottom:4px;line-height:1.3;font-size:11px}
+  .small{font-size:11px;color:var(--muted)}
+  .chip{display:inline-block;padding:2px 8px;border-radius:999px;
+    background:#1a2546;border:1px solid var(--border);color:var(--muted);font-size:11px}
+
+  /* ── Legend ───────────────────────────────────────────────── */
+  .legend{font-size:11px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .legend-item{display:flex;align-items:center;gap:4px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0}
+  .sl{display:inline-block;width:20px;height:3px;border-radius:2px;flex-shrink:0}
+  .hint{font-size:11px;color:var(--muted);margin-top:4px;font-style:italic}
+
+  /* ── Section divider ──────────────────────────────────────── */
+  .section-title{
+    font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 6px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-left">
+    <h1 class="header-title">Walk in the Network</h1>
+    <span class="header-sub">PubMed Co-authorship Explorer</span>
+  </div>
+  <span class="header-chip">PubMed · NCBI E-utilities</span>
+</header>
+
+<main>
+  <div class="graph-wrap" id="graphWrap">
+    <div id="network"></div>
+
+    <!-- Empty state -->
+    <div class="empty-hint" id="emptyHint">
+      <div class="empty-hint-icon">🔬</div>
+      <p class="empty-hint-title">Walk in the Network</p>
+      <p class="empty-hint-body">
+        Explore the invisible web of scientific collaboration.<br>
+        Enter an author and <b>Search PubMed</b> to begin your walk.
+      </p>
+      <div class="empty-hint-steps">
+        <div class="step"><span class="step-num">1</span>Type an author name →</div>
+        <div class="step"><span class="step-num">2</span>Press Search PubMed →</div>
+        <div class="step"><span class="step-num">3</span>Click any node to explore →</div>
+      </div>
+    </div>
+
+    <div class="overlay" aria-hidden="true">
+      <div class="spinner"></div>
+      <div class="overlay-label" id="overlayLabel">Loading…</div>
+    </div>
+  </div>
+
+  <aside>
+    <div class="controls">
+      <div>
+        <label for="author1">Author 1</label>
+        <input id="author1" type="text" value="" placeholder="e.g. Anthony Fauci"
+               autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">
+      </div>
+      <div>
+        <label for="author2">Author 2 (optional)</label>
+        <input id="author2" type="text" placeholder="Compare with another author"
+               autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">
+      </div>
+      <div class="row">
+        <div>
+          <label for="maxPapers">Max papers</label>
+          <input id="maxPapers" type="number" min="1" max="10000" value="500" inputmode="numeric">
+        </div>
+        <div>
+          <label for="maxCoauthors">Max co-authors</label>
+          <input id="maxCoauthors" type="number" min="5" max="500" value="50" inputmode="numeric">
+        </div>
+      </div>
+      <button id="go">🔍 Search PubMed</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <p class="section-title" style="margin:0">Top co-authors</p>
+        <span id="countChip" class="small"></span>
+      </div>
+      <table class="summary"><thead>
+        <tr><th>#</th><th>Co-author</th><th style="text-align:right">Papers</th></tr>
+      </thead><tbody id="summaryBody"></tbody></table>
+      <div class="hint">Tap a row to re-center the graph on that author.</div>
+
+      <div class="legend">
+        <div class="legend-item"><span class="sw" style="background:var(--c1)"></span>Author 1</div>
+        <div class="legend-item"><span class="sw" style="background:var(--c2)"></span>Author 2</div>
+        <div class="legend-item"><span class="sw" style="background:hsl(215,16%,68%)"></span>Co-author</div>
+        <div class="legend-item"><span class="sl" style="background:var(--e1)"></span>A1 edge</div>
+        <div class="legend-item"><span class="sl" style="background:var(--e2)"></span>A2 edge</div>
+        <div class="legend-item"><span class="sl" style="background:var(--es)"></span>Shared</div>
+        <div class="legend-item"><span class="sl" style="background:#7aa8d8"></span>1st↔last</div>
+      </div>
+    </div>
+
+    <div class="detail" id="detail"></div>
+  </aside>
+</main>
+
+<script>
+/* ================================================================
+   Constants & helpers
+   ================================================================ */
+const EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
+const TOOL   = "coauthorship_graph_web";
+const $      = id => document.getElementById(id);
+
+const setStatus = (msg, kind="") => {
+  const el = $("status");
+  el.textContent = msg || "";
+  el.className   = "status" + (kind ? " " + kind : "");
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* XSS-safe DOM builder */
+function el(tag, attrs, ...children){
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})){
+    if (k === "style")     Object.assign(node.style, v);
+    else if (k === "className") node.className = v;
+    else node.setAttribute(k, v);
+  }
+  for (const child of children){
+    if (child == null) continue;
+    node.append(typeof child === "string" ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+
+function commonParams(apiKey){
+  const p = new URLSearchParams({tool: TOOL});
+  if (apiKey) p.set("api_key", apiKey);
+  return p;
+}
+
+/* ================================================================
+   BUG FIX #1 – withRetry: always returns a value (or throws)
+   The original could fall through returning undefined when the last
+   attempt was a 429 that exhausted retries.
+   ================================================================ */
+async function withRetry(fn, attempts=3, baseMs=600){
+  let lastError;
+  for (let i=0; i<attempts; i++){
+    try{
+      const res = await fn();
+      if (res.status === 429){
+        lastError = new Error("Rate limited (HTTP 429). Add an NCBI API key for higher limits.");
+        if (i === attempts-1) throw lastError;
+        const wait = baseMs * (2 ** i);
+        setStatus(`Rate limited — retrying in ${wait/1000}s…`);
+        await sleep(wait);
+        continue;
+      }
+      return res;       // ← always returns on success
+    } catch(e){
+      lastError = e;
+      if (i === attempts-1) throw e;
+      await sleep(baseMs * (2 ** i));
+    }
+  }
+  throw lastError;      // ← unreachable, but guarantees no silent undefined
+}
+
+/* ================================================================
+   PubMed API helpers
+   ================================================================ */
+async function esearchAuthor(name, retmax, apiKey){
+  const p = commonParams(apiKey);
+  p.set("db","pubmed");
+  const tokens = name.trim().split(/\s+/);
+  let term;
+  if (tokens.length >= 2){
+    const reversed = [...tokens].reverse().join(" ");
+    term = `${name}[Author] OR ${reversed}[Author]`;
+  } else {
+    term = `${name}[Author]`;
+  }
+  p.set("term", term);
+  p.set("retmax", retmax);
+  p.set("retmode","json");
+  p.set("sort","pub_date");
+  const res = await withRetry(() => fetch(`${EUTILS}/esearch.fcgi?${p}`));
+  if (!res.ok) throw new Error(`ESearch HTTP ${res.status}`);
+  const data = await res.json();
+  if (data.esearchresult?.ERROR) throw new Error(data.esearchresult.ERROR);
+  return {
+    pmids: data.esearchresult?.idlist || [],
+    total: parseInt(data.esearchresult?.count || "0", 10)
+  };
+}
+
+async function efetchArticles(pmids, apiKey, onProgress){
+  const CHUNK = 150;
+  const chunks = [];
+  for (let i=0; i<pmids.length; i+=CHUNK) chunks.push(pmids.slice(i, i+CHUNK));
+  const gap = apiKey ? 120 : 360;
+  const articles = [];
+  for (let i=0; i<chunks.length; i++){
+    const body = commonParams(apiKey);
+    body.set("db","pubmed");
+    body.set("id", chunks[i].join(","));
+    body.set("retmode","xml");
+    const res = await withRetry(() => fetch(`${EUTILS}/efetch.fcgi`, {
+      method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body: body.toString()
+    }));
+    if (!res.ok) throw new Error(`EFetch HTTP ${res.status}`);
+    const xmlText = await res.text();
+    articles.push(...parseArticles(xmlText));
+    onProgress?.(articles.length, pmids.length);
+    if (i < chunks.length-1) await sleep(gap);
+  }
+  return articles;
+}
+
+function parseArticles(xmlText){
+  const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+  if (doc.querySelector("parsererror")) throw new Error("Malformed XML from PubMed");
+  const out = [];
+  doc.querySelectorAll("PubmedArticle").forEach(a => {
+    const pmid  = a.querySelector("PMID")?.textContent || "";
+    const title = (a.querySelector("ArticleTitle")?.textContent || "").trim();
+    let year    = a.querySelector("PubDate > Year")?.textContent;
+    if (!year)  year = (a.querySelector("PubDate > MedlineDate")?.textContent || "").slice(0,4);
+    const authors = [...a.querySelectorAll("AuthorList > Author")].map(an => ({
+      last: (an.querySelector("LastName")?.textContent || "").trim(),
+      fore: (an.querySelector("ForeName")?.textContent || "").trim(),
+      init: (an.querySelector("Initials")?.textContent || "").trim(),
+      coll: (an.querySelector("CollectiveName")?.textContent || "").trim()
+    }));
+    out.push({pmid, title, year: parseInt(year)||0, authors});
+  });
+  return out;
+}
+
+/* ================================================================
+   Author identity helpers
+   ================================================================ */
+function authorKey(au){
+  if (au.coll) return "C:" + au.coll.toLowerCase();
+  const last = au.last.toLowerCase();
+  if (!last) return null;
+  const name = au.fore
+    ? au.fore.toLowerCase().replace(/\s+/g,"_")
+    : (au.init || "").toLowerCase();
+  return `${last}|${name}`;
+}
+
+function displayName(au){
+  if (au.coll)            return au.coll;
+  if (au.fore && au.last) return `${au.fore} ${au.last}`;
+  if (au.init && au.last) return `${au.last} ${au.init}`;
+  return au.last || "";
+}
+
+/* BUG FIX #4 – matchesCenterOnce supports "Last First" ordering */
+function matchesCenterOnce(au, c){
+  /* exact match on "Fore Last" */
+  const foreLast = `${au.fore} ${au.last}`.toLowerCase().trim();
+  if (foreLast === c) return true;
+
+  const parts = c.split(/\s+/);
+  if (parts.length < 2) return au.last.toLowerCase() === c;
+
+  /* Try interpreting query as "First Last" */
+  const qLast  = parts[parts.length-1];
+  const qFirst = parts[0];
+  if (au.last.toLowerCase() === qLast){
+    if (au.fore && au.fore.toLowerCase().startsWith(qFirst)) return true;
+    if (au.init && au.init[0]?.toLowerCase() === qFirst[0])  return true;
+  }
+
+  /* Try interpreting query as "Last First" */
+  const qLastAlt  = parts[0];
+  const qFirstAlt = parts[parts.length-1];
+  if (au.last.toLowerCase() === qLastAlt){
+    if (au.fore && au.fore.toLowerCase().startsWith(qFirstAlt)) return true;
+    if (au.init && au.init[0]?.toLowerCase() === qFirstAlt[0])  return true;
+  }
+
+  return false;
+}
+
+function matchesCenter(au, centerName){
+  const c = centerName.trim().toLowerCase();
+  if (matchesCenterOnce(au, c)) return true;
+  const tokens = c.split(/\s+/);
+  if (tokens.length >= 2){
+    const reversed = [...tokens].reverse().join(" ");
+    if (reversed !== c && matchesCenterOnce(au, reversed)) return true;
+  }
+  return false;
+}
+
+/* ================================================================
+   Graph builder
+   BUG FIX #5 – first/last authorship logic
+     - We track, per co-author key, whether they appeared as the
+       FIRST or LAST author in any paper that also contains the
+       center node (not in pair loops where ordering is lost).
+     - "isFirst" means: the co-author appeared as first author AND
+       the center appeared in that paper (regardless of position).
+     - "isLast"  means: the co-author appeared as last  author AND
+       the center appeared in that paper.
+     - This matches the UX request: "if center is last and this
+       other person is first → show as first".
+
+   BUG FIX #2 – centerKey2 selection
+     When two authors are requested, we find one canonical key per
+     author name rather than relying on sorted paper-count rank.
+   ================================================================ */
+function buildAuthorGraph(papers, centerNames, topN){
+  const centerNameList = (Array.isArray(centerNames) ? centerNames : [centerNames])
+    .filter(n => n && n.trim());
+
+  const reg      = new Map();   // key → {name, papers[], titles[], years[]}
+  const pairCnt    = new Map();   // "a||b" → count
+  const pairPapers = new Map();   // "a||b" → [{year, title}]
+  const pairFirstLast = new Map(); // "a||b" → true if ever first↔last relationship
+
+  /* Per paper: who appeared as first / last author */
+  const firstOfPaper = new Map();  // pmid → authorKey (first human author)
+  const lastOfPaper  = new Map();  // pmid → authorKey (last  human author)
+
+  const centerKeyForName = new Map();  // centerName (lowercase) → Set<key>
+
+  for (const name of centerNameList){
+    centerKeyForName.set(name.trim().toLowerCase(), new Set());
+  }
+
+  /* ── Pass 1: register authors & detect center keys ─────────── */
+  for (const p of papers){
+    const seen = new Map();  // key → displayName (insertion-ordered = paper order)
+    for (const au of p.authors){
+      const k = authorKey(au);
+      if (!k) continue;
+      if (!seen.has(k)){
+        seen.set(k, displayName(au));
+      }
+      if (!reg.has(k)) reg.set(k, {name: displayName(au), papers:[], titles:[], years:[]});
+      const r = reg.get(k);
+      if (!r.papers.includes(p.pmid)){
+        r.papers.push(p.pmid);
+        r.titles.push(p.title);
+        r.years.push(p.year);
+      }
+      if (displayName(au).length > r.name.length) r.name = displayName(au);
+
+      for (const [cname, cset] of centerKeyForName){
+        if (matchesCenter(au, cname)) cset.add(k);
+      }
+    }
+
+    /* Determine first/last human-author key for this paper */
+    const orderedKeys = [...seen.keys()];
+    if (orderedKeys.length > 0){
+      firstOfPaper.set(p.pmid, orderedKeys[0]);
+      lastOfPaper.set(p.pmid,  orderedKeys[orderedKeys.length-1]);
+    }
+
+    /* Count pairs */
+    const keys = orderedKeys;
+    for (let i=0; i<keys.length; i++){
+      for (let j=i+1; j<keys.length; j++){
+        const [a,b] = [keys[i], keys[j]].sort();
+        const pk = `${a}||${b}`;
+        pairCnt.set(pk, (pairCnt.get(pk) || 0) + 1);
+        if (!pairPapers.has(pk)) pairPapers.set(pk, []);
+        pairPapers.get(pk).push({year: p.year, title: p.title});
+        /* Track if one of the pair is first-author AND the other is last-author */
+        const fk = orderedKeys[0];
+        const lk = orderedKeys[orderedKeys.length - 1];
+        const isFL = orderedKeys.length >= 2 && (
+          (keys[i] === fk && keys[j] === lk) ||
+          (keys[j] === fk && keys[i] === lk)
+        );
+        if (isFL) pairFirstLast.set(pk, true);
+      }
+    }
+  }
+
+  /* ── BUG FIX #2: resolve one canonical key per center name ─── */
+  /* If both names map to the same key, that's a single-author run */
+  const allCenterSets = [...centerKeyForName.values()];
+  const allCenterKeys = new Set(allCenterSets.flatMap(s => [...s]));
+
+  if (allCenterKeys.size === 0){
+    throw new Error(`Author not found in PubMed papers. Try full names like "Anthony S Fauci"`);
+  }
+
+  /* Pick best key per named author: most papers */
+  function bestKey(keySet){
+    let best = null, bestCount = -1;
+    for (const k of keySet){
+      const c = reg.get(k)?.papers.length ?? 0;
+      if (c > bestCount){ bestCount = c; best = k; }
+    }
+    return best;
+  }
+
+  const namesList   = [...centerKeyForName.keys()];
+  const centerKey1  = bestKey(centerKeyForName.get(namesList[0]) || new Set());
+  const centerKey2  = namesList.length > 1
+    ? bestKey(centerKeyForName.get(namesList[1]) || new Set())
+    : null;
+
+  if (!centerKey1) throw new Error(`"${namesList[0]}" not found. Try a more specific name.`);
+  if (namesList.length > 1 && !centerKey2){
+    throw new Error(`"${namesList[1]}" not found. Try a more specific name.`);
+  }
+
+  const centerKeys2Use = new Set([centerKey1, ...(centerKey2 ? [centerKey2] : [])]);
+
+  /* ── BUG FIX #5: first/last stats using paper-level positions ─ */
+  /* For each co-author, scan every paper containing a center key
+     and record whether the co-author was first/last in that paper. */
+  const coauthorStats = new Map();  // key → {shared, isFirst, isLast}
+
+  function statsFor(key){
+    if (!coauthorStats.has(key)){
+      coauthorStats.set(key, {shared:0, isFirst:false, isLast:false});
+    }
+    return coauthorStats.get(key);
+  }
+
+  for (const p of papers){
+    /* Find which center keys appear in this paper */
+    const paperKeys = new Set(
+      p.authors.map(au => authorKey(au)).filter(Boolean)
+    );
+    const centersInPaper = [...centerKeys2Use].filter(ck => paperKeys.has(ck));
+    if (centersInPaper.length === 0) continue;
+
+    const fk = firstOfPaper.get(p.pmid);
+    const lk  = lastOfPaper.get(p.pmid);
+
+    for (const coKey of paperKeys){
+      if (centerKeys2Use.has(coKey)) continue;  // skip center nodes themselves
+
+      const s = statsFor(coKey);
+      s.shared += 1;
+      /* isFirst: co-author is first author of this paper */
+      if (fk === coKey) s.isFirst = true;
+      /* isLast:  co-author is last  author of this paper */
+      if (lk === coKey) s.isLast  = true;
+    }
+  }
+
+  /* Rank co-authors and keep top N */
+  const rankedCo = [...coauthorStats.entries()]
+    .sort((x,y) => y[1].shared - x[1].shared)
+    .slice(0, topN)
+    .map(([k, s]) => ({
+      key: k, shared: s.shared, name: reg.get(k)?.name || k,
+      isFirst: s.isFirst, isLast: s.isLast
+    }));
+
+  const keep = new Set([...centerKeys2Use, ...rankedCo.map(r => r.key)]);
+
+  /* ── Build node list ────────────────────────────────────────── */
+  const nodes = [];
+  for (const k of keep){
+    const info = reg.get(k);
+    if (!info) continue;
+    nodes.push({
+      key: k,
+      isCenter1: k === centerKey1,
+      isCenter2: k === centerKey2,
+      name:       info.name,
+      papersCount:info.papers.length,
+      titles:     info.titles,
+      years:      info.years
+    });
+  }
+
+  /* ── Build edge list ────────────────────────────────────────── */
+  const edges = [];
+  for (const [pk, count] of pairCnt){
+    const [a,b] = pk.split("||");
+    if (!keep.has(a) || !keep.has(b)) continue;
+
+    const aIsC1 = a === centerKey1, aIsC2 = a === centerKey2;
+    const bIsC1 = b === centerKey1, bIsC2 = b === centerKey2;
+    const aIsCenter = aIsC1 || aIsC2;
+    const bIsCenter = bIsC1 || bIsC2;
+
+    let fromCenter = null;
+    if (aIsCenter && bIsCenter){
+      fromCenter = "both";
+    } else if (aIsCenter){
+      fromCenter = aIsC1 ? "center1" : "center2";
+    } else if (bIsCenter){
+      fromCenter = bIsC1 ? "center1" : "center2";
+    }
+    edges.push({a, b, count, fromCenter, hasFirstLast: !!pairFirstLast.get(pk), papers: (pairPapers.get(pk) || []).sort((x,y)=>(y.year||0)-(x.year||0))});
+  }
+
+  return {
+    nodes, edges,
+    centerKey:  centerKey1,
+    centerKey2: centerKey2 || null,
+    centerDisplay:  reg.get(centerKey1)?.name || namesList[0],
+    centerDisplay2: centerKey2 ? (reg.get(centerKey2)?.name || namesList[1]) : null,
+    topCoauthors: rankedCo
+  };
+}
+
+/* ================================================================
+   Vis.js rendering
+   BUG FIX #3 – Author 1 / Author 2 now use different colours
+   ================================================================ */
+let network = null, networkData = null, nodesById = new Map(), currentGraph = null;
+
+/* CSS variable → hex helper (read from :root at runtime) */
+const cssVar = name => getComputedStyle(document.documentElement)
+  .getPropertyValue(name).trim();
+
+function buildVisData(graph){
+  const maxPapers = Math.max(1, ...graph.nodes.map(n => n.papersCount));
+
+  /* ── Colours from CSS vars (defined once, so legend stays in sync) */
+  const C1 = cssVar("--c1");   // cyan    – Author 1 node
+  const C2 = cssVar("--c2");   // orange  – Author 2 node
+  const CO = cssVar("--co");   // steel   – co-author node
+  const E1 = cssVar("--e1");   // cyan    – Author 1 edge
+  const E2 = cssVar("--e2");   // orange  – Author 2 edge
+  const ES = cssVar("--es");   // gold    – shared edge
+  const EG = cssVar("--eg");   // dim     – co↔co edge
+
+  const visNodes = graph.nodes.map(n => {
+    const t = n.papersCount / maxPapers;
+
+    let color, borderWidth, font;
+    if (n.isCenter1){
+      /* Author 1: blue core → deep navy border gradient feel */
+      color = {
+        background: C1,
+        border:     "#1a3a6b",
+        highlight:  {background:"#7bbfff", border:"#2a5aab"},
+        hover:      {background:"#6ab0ff", border:"#1e4a8a"}
+      };
+      borderWidth = 3;
+      font = {
+        color:"#ffffff", size:14, face:"monospace",
+        background:"rgba(14,21,37,0.82)",
+        strokeWidth:0
+      };
+    } else if (n.isCenter2){
+      /* Author 2: soft purple core → deep purple border */
+      color = {
+        background: C2,
+        border:     "#4a2a8a",
+        highlight:  {background:"#c4b5fd", border:"#6a3aaa"},
+        hover:      {background:"#b39ffc", border:"#5a30a0"}
+      };
+      borderWidth = 3;
+      font = {
+        color:"#ffffff", size:14, face:"monospace",
+        background:"rgba(14,21,37,0.82)",
+        strokeWidth:0
+      };
+    } else {
+      /* Co-author: refined silver-white, paper count → brighter & more saturated */
+      const L   = 52 + t * 32;   // 52%→84%  dark silver to near-white
+      const S   = 12 + t * 8;    // 12%→20%  subtle cool tint
+      const bL  = Math.min(L + 14, 92);
+      color = {
+        background: `hsl(215, ${S}%, ${L}%)`,
+        border:     `hsl(215, ${S + 8}%, ${bL}%)`,
+        highlight:  {background:"#f0f4ff", border:"#c8d4f0"},
+        hover:      {background:"#e4eaf8", border:"#b0bede"}
+      };
+      borderWidth = 1;
+      font = {
+        color:"#ffffff", size:10 + t*3, face:"monospace",
+        background:"rgba(14,21,37,0.80)",
+        strokeWidth:0
+      };
+    }
+
+    /* Tooltip */
+    const sortedTitles = n.titles
+      .map((t2,i) => ({title:t2, year:n.years[i]}))
+      .sort((a,b) => (b.year||0) - (a.year||0));
+
+    const tooltip = document.createElement("div");
+    tooltip.style.cssText = "max-width:430px;line-height:1.7;font-family:ui-monospace,monospace;font-size:12px;padding:4px 2px";
+    const hdr = document.createElement("div");
+    const nb = document.createElement("b");
+    nb.style.fontSize = "13px";
+    nb.textContent = n.name;
+    const cs = document.createElement("span");
+    cs.style.cssText = "color:#6e8ab5;margin-left:8px";
+    cs.textContent = `${n.papersCount} papers`;
+    hdr.append(nb, cs);
+    const hr = document.createElement("hr");
+    hr.style.cssText = "border:none;border-top:1px solid #1c2e52;margin:5px 0";
+    const sc = document.createElement("div");
+    sc.style.cssText = "max-height:300px;overflow-y:auto";
+    sortedTitles.forEach(({title, year}) => {
+      const row = document.createElement("div");
+      row.textContent = `${year ? `(${year})` : "(----)"}  ${title}`;
+      sc.appendChild(row);
+    });
+    tooltip.append(hdr, hr, sc);
+
+    return {
+      id:          n.key,
+      label:       n.name,
+      value:       12 + t * 50,
+      color,
+      borderWidth,
+      font,
+      title:       tooltip
+    };
+  });
+
+  /* ── Edges ──────────────────────────────────────────────────── */
+  const maxStrength = Math.max(1, ...graph.edges.map(e => e.count));
+
+  const visEdges = graph.edges.map((e,i) => {
+    const t = e.count / maxStrength;
+    let baseColor, width;
+    if (e.fromCenter === "center1"){
+      baseColor = E1;
+      width = 0.8 + t * 5;
+    } else if (e.fromCenter === "center2"){
+      baseColor = E2;
+      width = 0.8 + t * 5;
+    } else if (e.fromCenter === "both"){
+      baseColor = ES;
+      width = 1.5 + t * 7;
+    } else if (e.hasFirstLast){
+      /* co-author↔co-author with a first–last relationship → brighter blue-grey */
+      baseColor = "#7aa8d8";
+      width = 0.6 + t * 2.5;
+    } else {
+      baseColor = EG;
+      width = 0.3 + t * 1.5;
+    }
+
+    /* Opacity */
+    let alpha;
+    if (e.fromCenter){
+      alpha = (0.3 + t * 0.7).toFixed(2);
+    } else if (e.hasFirstLast){
+      alpha = (0.35 + t * 0.45).toFixed(2);   // brighter than dim, softer than center edges
+    } else {
+      alpha = (0.08 + t * 0.22).toFixed(2);   // very dim
+    }
+    const color = hexToRgba(baseColor, alpha);
+
+    /* Build a DOM tooltip with (year) Title lines */
+    const edgeTip = document.createElement("div");
+    edgeTip.style.cssText = "max-width:420px;font-family:ui-monospace,monospace;font-size:12px;padding:2px";
+    const tipHdr = document.createElement("div");
+    tipHdr.style.cssText = "color:#8aa0c7;margin-bottom:4px;font-size:11px";
+    tipHdr.textContent = `${e.count} shared paper${e.count>1?"s":""}`;
+    const tipList = document.createElement("div");
+    tipList.style.cssText = "max-height:260px;overflow-y:auto;line-height:1.6";
+    (e.papers || []).slice(0, 30).forEach(({year, title}) => {
+      const row = document.createElement("div");
+      row.textContent = `${year ? `(${year})` : "(----)"}  ${title}`;
+      tipList.appendChild(row);
+    });
+    if ((e.papers||[]).length > 30){
+      const more = document.createElement("div");
+      more.style.color = "#8aa0c7";
+      more.textContent = `… and ${e.papers.length - 30} more`;
+      tipList.appendChild(more);
+    }
+    edgeTip.append(tipHdr, tipList);
+
+    return {
+      id:    `e${i}`,
+      from:  e.a,
+      to:    e.b,
+      value: 1 + t*10,
+      width,
+      color: {
+        color,
+        highlight: "rgba(255,255,255,0.95)",
+        hover:     "rgba(255,255,255,0.75)"
+      },
+      title: edgeTip
+    };
+  });
+
+  return {visNodes, visEdges};
+}
+
+/* Helper: "#rrggbb" + alpha → "rgba(r,g,b,a)" */
+function hexToRgba(hex, alpha){
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/* ================================================================
+   Network options & render
+   BUG FIX #6 – stabilizationIterationsDone listener de-dup
+   ================================================================ */
+const NET_OPTIONS = {
+  nodes:{ shape:"dot", scaling:{min:8, max:65} },
+  edges:{ smooth:{enabled:true, type:"continuous", roundness:0.2}, scaling:{min:0.5, max:9} },
+  physics:{
+    solver:"forceAtlas2Based",
+    forceAtlas2Based:{
+      gravitationalConstant:-55,
+      centralGravity:0.01,
+      springLength:140,
+      springConstant:0.04,
+      damping:0.5,
+      avoidOverlap:0.8
+    },
+    stabilization:{enabled:true, iterations:300, updateInterval:25}
+  },
+  interaction:{
+    hover:true, tooltipDelay:80,
+    navigationButtons:true, keyboard:true,
+    zoomView:true, dragNodes:true
+  }
+};
+
+/* BUG FIX #6: wrap stabilize+fit in a reusable function to avoid
+   duplicate "stabilizationIterationsDone" listeners on re-renders */
+function stabilizeAndFit(duration=650){
+  network.once("stabilizationIterationsDone", () => {
+    network.fit({animation:{duration, easingFunction:"easeInOutQuad"}});
+    network.setOptions({physics:{enabled:false}});
+  });
+}
+
+function render(graph){
+  currentGraph = graph;
+  const hint = $("emptyHint");
+  if (hint) hint.style.display = "none";
+  nodesById = new Map(graph.nodes.map(n => [n.key, n]));
+  const {visNodes, visEdges} = buildVisData(graph);
+
+  if (!network){
+    networkData = {
+      nodes: new vis.DataSet(visNodes),
+      edges: new vis.DataSet(visEdges)
+    };
+    network = new vis.Network($("network"), networkData, NET_OPTIONS);
+
+    network.on("selectNode", params => {
+      const id   = params.nodes[0];
+      const node = nodesById.get(id);
+      if (!node || !currentGraph) return;
+      if (currentGraph.centerKey === node.key || currentGraph.centerKey2 === node.key){
+        showDetail(node);
+      } else {
+        $("author1").value = node.name;
+        $("author2").value = "";
+        run();
+      }
+    });
+
+    stabilizeAndFit(600);
+  } else {
+    const newNodeIds = new Set(visNodes.map(n => n.id));
+    const newEdgeIds = new Set(visEdges.map(e => e.id));
+    networkData.edges.remove(networkData.edges.getIds().filter(id => !newEdgeIds.has(id)));
+    networkData.nodes.remove(networkData.nodes.getIds().filter(id => !newNodeIds.has(id)));
+    networkData.nodes.update(visNodes);
+    networkData.edges.update(visEdges);
+    network.setOptions({physics:{enabled:true}});
+    /* BUG FIX #6: stabilize() with explicit iteration count,
+       then attach a fresh once-listener */
+    network.stabilize(250);
+    stabilizeAndFit(700);
+  }
+}
+
+/* ================================================================
+   Summary table + detail panel
+   BUG FIX #5 cont. – correct first/last badge labels
+   ================================================================ */
+function renderSummary(graph){
+  const tb = $("summaryBody");
+  tb.replaceChildren();
+
+  graph.topCoauthors.forEach((c, i) => {
+    const tr = document.createElement("tr");
+    tr.className = "pick";
+    tr.title = `Click to search for ${c.name}`;
+
+    const tdNum = document.createElement("td");
+    tdNum.textContent = i+1;
+
+    const tdName = document.createElement("td");
+    tdName.textContent = c.name;
+
+    /* BUG FIX #5: show BOTH badges when applicable;
+       "1st" = co-author was the first author in some shared paper
+       "last"= co-author was the last  author in some shared paper */
+    if (c.isFirst){
+      tdName.append(el("span",
+        {style:{color:"#fbbf24",marginLeft:"5px",fontWeight:"700",fontSize:"10px"}},
+        "1st"));
+    }
+    if (c.isLast){
+      tdName.append(el("span",
+        {style:{color:"#f472b6",marginLeft:"5px",fontWeight:"700",fontSize:"10px"}},
+        "last"));
+    }
+
+    const tdCount = document.createElement("td");
+    tdCount.style.textAlign = "right";
+    tdCount.textContent = c.shared;
+
+    tr.append(tdNum, tdName, tdCount);
+    tr.addEventListener("click", () => {
+      $("author1").value = c.name;
+      $("author2").value = "";
+      run();
+    });
+    tb.appendChild(tr);
+  });
+
+  $("countChip").textContent = `${graph.nodes.length} nodes · ${graph.edges.length} edges`;
+}
+
+function showDetail(node){
+  const sortedTitles = node.titles
+    .map((t,i) => ({title:t, year:node.years[i]}))
+    .sort((a,b) => (b.year||0)-(a.year||0));
+
+  const detail = $("detail");
+  detail.replaceChildren();
+
+  const h3 = document.createElement("h3");
+  h3.textContent = node.name;
+
+  const sub = document.createElement("div");
+  sub.className = "small";
+  sub.textContent = `${node.papersCount} papers in set`;
+
+  const ol = document.createElement("ol");
+  sortedTitles.slice(0,30).forEach(({title, year}) => {
+    const li = document.createElement("li");
+    li.textContent = year ? `(${year}) ${title}` : title;
+    ol.appendChild(li);
+  });
+  detail.append(h3, sub, ol);
+
+  if (node.titles.length > 30){
+    const more = document.createElement("div");
+    more.className = "small";
+    more.textContent = `… and ${node.titles.length-30} more`;
+    detail.appendChild(more);
+  }
+}
+
+/* ================================================================
+   Main runner
+   ================================================================ */
+function setLoading(on, label){
+  const wrap = $("graphWrap");
+  if (!wrap) return;
+  wrap.classList.toggle("loading", !!on);
+  if (label) $("overlayLabel").textContent = label;
+}
+
+async function run(){
+  const name1 = $("author1").value.trim();
+  const name2 = $("author2").value.trim();
+  if (!name1){ setStatus("Enter Author 1", "err"); return; }
+  const names      = name2 ? [name1, name2] : [name1];
+  const maxPapers  = Math.max(1,  parseInt($("maxPapers").value   || "500", 10));
+  const maxCo      = Math.max(5,  parseInt($("maxCoauthors").value|| "50",  10));
+  const apiKey     = "";   // API key field removed
+
+  $("go").disabled = true;
+  setStatus(`Searching for ${name2 ? name1+" & "+name2 : name1}…`);
+  setLoading(true, "Fetching paper IDs…");
+
+  try{
+    const pmidSets = await Promise.all(
+      names.map(a => esearchAuthor(a, maxPapers, apiKey))
+    );
+    for (const {pmids, _} of pmidSets){
+      if (!pmids.length) throw new Error("No papers found. Check the author name.");
+    }
+    const uniquePmids = [...new Set(pmidSets.flatMap(r => r.pmids))];
+    setStatus(`Fetching ${uniquePmids.length} unique papers…`);
+    setLoading(true, `Fetching ${uniquePmids.length} papers…`);
+
+    const allPapers = await efetchArticles(uniquePmids, apiKey, (done, tot) => {
+      setStatus(`Fetching ${done}/${tot} papers…`);
+      setLoading(true, `Fetching ${done}/${tot}…`);
+    });
+
+    setStatus("Building graph…");
+    setLoading(true, "Building graph…");
+
+    const graph = buildAuthorGraph(allPapers, names, maxCo);
+    render(graph);
+    renderSummary(graph);
+
+    const centerNode = graph.nodes.find(n => n.key === graph.centerKey);
+    if (centerNode) showDetail(centerNode);
+
+    const desc = name2
+      ? `${graph.centerDisplay} & ${graph.centerDisplay2}`
+      : graph.centerDisplay;
+    setStatus(`✓ ${allPapers.length} papers · ${desc}`, "ok");
+
+  } catch(err){
+    setStatus(`Error: ${err.message}`, "err");
+  } finally {
+    setLoading(false);
+    $("go").disabled = false;
+  }
+}
+
+/* ── Event listeners ──────────────────────────────────────────── */
+$("go").addEventListener("click", () => run());
+[$("author1"), $("author2")].forEach(inp => {
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+});
+</script>
+</body>
+</html>
